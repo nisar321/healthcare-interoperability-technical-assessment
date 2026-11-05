@@ -1,0 +1,137 @@
+package com.drajer.cdafromr4;
+
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
+import com.drajer.bsa.utils.R3ToR2DataConverterUtils;
+import com.drajer.cda.utils.CdaGeneratorConstants;
+import com.drajer.cda.utils.CdaGeneratorUtils;
+import com.drajer.sof.model.R4FhirData;
+import com.drajer.test.util.TestUtils;
+import java.util.*;
+import org.hl7.fhir.r4.model.*;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Mockito;
+import org.powermock.api.mockito.PowerMockito;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
+
+@RunWith(PowerMockRunner.class)
+@PrepareForTest({CdaGeneratorUtils.class})
+public class CdaProcedureGeneratorTest extends BaseGeneratorTest {
+
+  private static final String VERSION = CdaGeneratorConstants.CDA_EICR_VERSION_R11;
+
+  private static final String PROCEDURE_CDA_FILE = "CdaTestData/Cda/Procedure/procedure.xml";
+
+  private static final String EMPTY_PROCEDURE_CDA_FILE =
+      "CdaTestData/Cda/Procedure/emptyProcedure.xml";
+
+  @Test
+  public void testGenerateProcedureSection() {
+
+    R4FhirData data = new R4FhirData();
+    Bundle b = loadBundleFromFile("CdaTestData/bundle/procedure.json");
+
+    List<Bundle.BundleEntryComponent> entries = b.getEntry();
+    Bundle bundle = new Bundle();
+    Set<Resource> resourceSet = new LinkedHashSet<>(); // Initialize HashSet outside the loop
+
+    Map<ResourceType, Set<Resource>> resourcesByType = new HashMap<>();
+
+    for (Bundle.BundleEntryComponent ent : entries) {
+      Resource resource = ent.getResource();
+      ResourceType resourceType = resource.getResourceType();
+
+      resourcesByType.computeIfAbsent(resourceType, k -> new LinkedHashSet<>()).add(resource);
+    }
+
+    Map<String, List<String>> uniqueResourceIdsByType = new HashMap<>();
+    for (Bundle.BundleEntryComponent ent : entries) {
+
+      ResourceType resourceType = ent.getResource().getResourceType();
+
+      resourceSet.addAll(resourcesByType.getOrDefault(resourceType, Collections.EMPTY_SET));
+
+      if (!resourceSet.isEmpty()) {
+        R3ToR2DataConverterUtils.addResourcesToR4FhirData(
+            "1",
+            bundle,
+            data,
+            launchDetails,
+            resourceSet,
+            resourceType.toString(),
+            uniqueResourceIdsByType);
+        resourceSet.clear();
+        resourcesByType.remove(resourceType);
+      }
+    }
+    data.setData(bundle);
+    String expectedXml = TestUtils.getFileContentAsString(PROCEDURE_CDA_FILE);
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForIIUsingGuid()).thenReturn(XML_FOR_II_USING_GUID);
+
+    String actualXml = CdaProcedureGenerator.generateProcedureSection(data, launchDetails, VERSION);
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateProcedureSection_withEmptyData() {
+
+    String expectedXml = TestUtils.getFileContentAsString(EMPTY_PROCEDURE_CDA_FILE);
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForIIUsingGuid()).thenReturn(XML_FOR_II_USING_GUID);
+
+    String actualXml =
+        CdaProcedureGenerator.generateProcedureSection(r4FhirData, launchDetails, VERSION);
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateProcedureSection_withInvalidCode() {
+
+    String expectedXml = TestUtils.getFileContentAsString(EMPTY_PROCEDURE_CDA_FILE);
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForIIUsingGuid()).thenReturn(XML_FOR_II_USING_GUID);
+
+    Procedure procedure = new Procedure();
+
+    CodeableConcept codeableConcept =
+        new CodeableConcept()
+            .addCoding(
+                new Coding()
+                    .setSystem(CdaGeneratorConstants.FHIR_RXNORM_URL)
+                    .setCode("123456")
+                    .setDisplay("Test Procedure"));
+    procedure.setCode(codeableConcept);
+
+    R4FhirData r4Data = new R4FhirData();
+    r4Data.setProcedureList(Collections.singletonList(procedure));
+
+    String actualXml =
+        CdaProcedureGenerator.generateProcedureSection(r4Data, launchDetails, VERSION);
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateProcedureSectionHeader_bothArms() {
+    String nf = CdaProcedureGenerator.generateProcedureSectionHeader(CdaGeneratorConstants.NF_NI);
+    assertNotNull(nf);
+    assertTrue("nullFlavor section must be emitted", nf.contains(CdaGeneratorConstants.NF_NI));
+
+    String normal = CdaProcedureGenerator.generateProcedureSectionHeader("");
+    assertNotNull(normal);
+    assertTrue("a plain section must be opened", normal.contains("<section"));
+  }
+
+  @Test
+  public void testGenerateProcedureSection_withNoProcedures() {
+    String xml =
+        CdaProcedureGenerator.generateProcedureSection(new R4FhirData(), launchDetails, VERSION);
+    assertNotNull("A section must still be produced", xml);
+  }
+}

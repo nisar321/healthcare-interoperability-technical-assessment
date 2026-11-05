@@ -1,0 +1,179 @@
+package com.drajer.test;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
+import static org.junit.Assert.assertEquals;
+
+import com.drajer.ecrapp.config.SpringConfiguration;
+import com.drajer.sof.model.ClientDetails;
+import com.drajer.test.util.TestUtils;
+import com.drajer.test.util.WireMockHandle;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.tomakehurst.wiremock.WireMockServer;
+import java.io.IOException;
+import java.time.Duration;
+import java.util.TimeZone;
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.hibernate.Transaction;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.ClassRule;
+import org.junit.Rule;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.restclient.RestTemplateBuilder;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.annotation.DirtiesContext.ClassMode;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.junit4.rules.SpringClassRule;
+import org.springframework.test.context.junit4.rules.SpringMethodRule;
+
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+@ContextConfiguration(classes = SpringConfiguration.class)
+@DirtiesContext(classMode = ClassMode.AFTER_EACH_TEST_METHOD)
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+public abstract class BaseIntegrationTest {
+
+  private static final Logger logger = LoggerFactory.getLogger(BaseIntegrationTest.class);
+
+  @ClassRule public static final SpringClassRule SPRING_CLASS_RULE = new SpringClassRule();
+
+  @Rule public final SpringMethodRule springMethodRule = new SpringMethodRule();
+
+  @LocalServerPort protected int port;
+
+  @Autowired protected SessionFactory sessionFactory;
+  protected Session session = null;
+  protected Transaction tx = null;
+  protected HttpHeaders headers = new HttpHeaders();
+
+  protected static final ObjectMapper mapper = new ObjectMapper();
+
+  protected static final String URL = "http://localhost:";
+
+  protected static final String FHIR_BASE_URL = "/FHIR";
+  protected static final int WIRE_MOCK_HTTP_PORT = 9011;
+
+  protected WireMockServer wireMockServer;
+  protected ClientDetails clientDetails;
+  protected TestRestTemplate restTemplate;
+  @Autowired private RestTemplateBuilder restTemplateBuilder;
+
+  @Before
+  public void setUp() throws Throwable {
+    restTemplate =
+        new TestRestTemplate(
+            restTemplateBuilder
+                .connectTimeout(Duration.ofSeconds(1000))
+                .readTimeout(Duration.ofSeconds(600)));
+    TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+    session = sessionFactory.openSession();
+    wireMockServer = WireMockHandle.getInstance().getWireMockServer(WIRE_MOCK_HTTP_PORT);
+    wireMockServer.resetMappings();
+    headers.clear();
+  }
+
+  @After
+  public void tearDown() {
+    if (session != null) {
+      session.close();
+    }
+  }
+
+  protected String getSystemLaunchPayload(String systemLaunchFile) throws IOException {
+
+    try {
+      String systemLaunchPayload = TestUtils.getFileContentAsString(systemLaunchFile);
+
+      String fhirUrl =
+          clientDetails != null
+              ? clientDetails.getFhirServerBaseURL()
+              : URL + WIRE_MOCK_HTTP_PORT + FHIR_BASE_URL;
+      JSONObject jsonObject = new JSONObject(systemLaunchPayload);
+      jsonObject.put("fhirServerURL", fhirUrl);
+      systemLaunchPayload = jsonObject.toString();
+
+      return systemLaunchPayload;
+    } catch (JSONException e) {
+      throw new IOException(e);
+    }
+  }
+
+  protected String getSystemLaunch3Payload(String systemLaunchFile) {
+
+    return TestUtils.getFileContentAsString(systemLaunchFile);
+  }
+
+  protected void createClientDetails(String clientDetailsFile) throws IOException, JSONException {
+
+    String clientDetailString = TestUtils.getFileContentAsString(clientDetailsFile);
+
+    String fhirUrl = URL + WIRE_MOCK_HTTP_PORT + FHIR_BASE_URL;
+    String authUrl = fhirUrl + "/token";
+    String directUrl = URL + WIRE_MOCK_HTTP_PORT + "/directurl";
+    JSONObject jsonObject = new JSONObject(clientDetailString);
+    jsonObject.put("fhirServerBaseURL", fhirUrl);
+    jsonObject.put("tokenURL", authUrl);
+    jsonObject.put("restAPIURL", directUrl);
+    clientDetailString = jsonObject.toString();
+
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    HttpEntity<String> entity = new HttpEntity<>(clientDetailString, headers);
+    ResponseEntity<String> response =
+        restTemplate.exchange(
+            createURLWithPort("/api/clientDetails"), HttpMethod.POST, entity, String.class);
+    clientDetails = mapper.readValue(response.getBody(), ClientDetails.class);
+
+    assertEquals("Failed to save client details", HttpStatus.OK, response.getStatusCode());
+  }
+
+  protected ResponseEntity<String> invokeSystemLaunch(
+      String requestId, String systemLaunchPayload) {
+
+    logger.info("Invoking systemLaunch with payload: {}", systemLaunchPayload);
+
+    headers.setContentType(MediaType.APPLICATION_JSON);
+    headers.add("X-Request-ID", requestId);
+    HttpEntity<String> entity = new HttpEntity<>(systemLaunchPayload, headers);
+    return restTemplate.exchange(
+        createURLWithPort("/api/systemLaunch"), HttpMethod.POST, entity, String.class);
+  }
+
+  protected String createURLWithPort(String uri) {
+    return URL + port + uri;
+  }
+
+  protected void mockRestApi() {
+
+    String restResponse = "{\"status\":\"success\"}";
+
+    wireMockServer.stubFor(
+        post(urlPathEqualTo("/directurl"))
+            .atPriority(1)
+            .willReturn(
+                aResponse()
+                    .withStatus(200)
+                    .withBody(restResponse)
+                    .withHeader("Content-Type", "application/json; charset=utf-8")));
+  }
+
+  protected Session getSession() {
+    return sessionFactory.getCurrentSession();
+  }
+}

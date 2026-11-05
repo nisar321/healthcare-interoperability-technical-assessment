@@ -1,0 +1,1421 @@
+package com.drajer.cdafromr4;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import com.drajer.cda.utils.CdaGeneratorConstants;
+import com.drajer.cda.utils.CdaGeneratorUtils;
+import com.drajer.eca.model.ActionRepo;
+import com.drajer.ecrapp.model.Eicr;
+import com.drajer.ecrapp.service.EicrRRService;
+import com.drajer.sof.model.R4FhirData;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import org.hl7.fhir.r4.model.*;
+import org.hl7.fhir.r4.model.Address;
+import org.hl7.fhir.r4.model.BooleanType;
+import org.hl7.fhir.r4.model.DateTimeType;
+import org.hl7.fhir.r4.model.Location;
+import org.hl7.fhir.r4.model.Organization;
+import org.hl7.fhir.r4.model.Patient;
+import org.hl7.fhir.r4.model.Patient.ContactComponent;
+import org.hl7.fhir.r4.model.codesystems.V3ParticipationType;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Mockito;
+import org.powermock.api.mockito.PowerMockito;
+import org.powermock.core.classloader.annotations.PowerMockIgnore;
+import org.powermock.core.classloader.annotations.PrepareForTest;
+import org.powermock.modules.junit4.PowerMockRunner;
+
+@RunWith(PowerMockRunner.class)
+@PrepareForTest({CdaGeneratorUtils.class, ActionRepo.class})
+@PowerMockIgnore({"com.sun.org.apache.xerces.*", "javax.xml.*", "org.xml.*", "javax.management.*"})
+public class CdaHeaderGeneratorTest extends BaseGeneratorTest {
+
+  static final String PATIENT_RES_FILENAME = "CdaTestData/patient/Patient_resource.json";
+
+  static final String LOCATION_FILENAME = "CdaTestData/patient/Location.json";
+
+  static final String ORGANIZATION_FILENAME = "CdaTestData/patient/Organization.json";
+  static final String PRACTITIONER_FILENAME = "CdaTestData/Practitioner/Practitioner.json";
+
+  @Test
+  public void testCreateCdaHeader() {
+
+    R4FhirData r4Data = new R4FhirData();
+    Bundle bundle = loadBundleFromFile(PATIENT_RES_FILENAME);
+    r4Data = createR4Resource(r4Data, bundle);
+    r4Data.setData(bundle);
+
+    ActionRepo actionRepoMock = mock(ActionRepo.class);
+    PowerMockito.mockStatic(ActionRepo.class);
+    when(ActionRepo.getInstance()).thenReturn(actionRepoMock);
+
+    EicrRRService eicrRRServiceMock = mock(EicrRRService.class);
+    when(actionRepoMock.getEicrRRService()).thenReturn(eicrRRServiceMock);
+    when(eicrRRServiceMock.getMaxVersionId(any(Eicr.class))).thenReturn(1);
+
+    String actualXml =
+        CdaHeaderGenerator.createCdaHeader(
+            r4Data,
+            launchDetails,
+            eicr,
+            eicrDocVersion,
+            CdaGeneratorConstants.CDA_EICR_VERSION_R11);
+
+    assertNotNull(actualXml);
+  }
+
+  @Test
+  public void testGenerateXmlForDetailedEthnicityCode() {
+    List<Extension> extensions = new ArrayList<>();
+    extensions.add(
+        createExtension(
+            "http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity",
+            "2178-2",
+            "Latin American"));
+
+    String expectedXml =
+        "<sdtc:ethnicGroupCode code=\"2178-2\" codeSystem=\"2.16.840.1.113883.6.238\" codeSystemName=\"Race &amp; Ethnicity - CDC\" displayName=\"Latin American\"/>\r\n";
+    String actualXml =
+        CdaFhirUtilities.generateXmlForDetailedRaceAndEthnicityCodes(
+            extensions,
+            CdaGeneratorConstants.FHIR_USCORE_ETHNICITY_EXT_URL,
+            CdaGeneratorConstants.OMB_ETHNICITY_DETAILED_URL,
+            CdaGeneratorConstants.SDTC_DETAILED_ETHNIC_GROUP_CODE);
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateXmlForDetailedRaceCode() {
+    List<Extension> extensions = new ArrayList<>();
+    extensions.add(
+        createExtension(
+            "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race",
+            "1072-8",
+            "Mexican American Indian"));
+
+    String expectedXml =
+        "<sdtc:raceCode code=\"1072-8\" codeSystem=\"2.16.840.1.113883.6.238\" codeSystemName=\"Race &amp; Ethnicity - CDC\" displayName=\"Mexican American Indian\"/>\r\n";
+    String actualXml =
+        CdaFhirUtilities.generateXmlForDetailedRaceAndEthnicityCodes(
+            extensions,
+            CdaGeneratorConstants.FHIR_USCORE_RACE_EXT_URL,
+            CdaGeneratorConstants.OMB_RACE_DETAILED_URL,
+            CdaGeneratorConstants.SDTC_DETAILED_RACE_CODE);
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateXmlForDetailedUnknownRaceCode() {
+    List<Extension> extensions = new ArrayList<>();
+    extensions.add(
+        createExtension(
+            "http://hl7.org/fhir/us/core/StructureDefinition/us-core-race",
+            "ASKU",
+            "asked but unknown"));
+
+    String expectedXml = "<sdtc:raceCode nullFlavor=\"ASKU\"/>";
+    String actualXml =
+        CdaFhirUtilities.generateXmlForDetailedRaceAndEthnicityCodes(
+            extensions,
+            CdaGeneratorConstants.FHIR_USCORE_RACE_EXT_URL,
+            CdaGeneratorConstants.OMB_RACE_DETAILED_URL,
+            CdaGeneratorConstants.SDTC_DETAILED_RACE_CODE);
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  private Extension createExtension(String extUrl, String code, String display) {
+    Extension extension = new Extension();
+    Coding codingValue = new Coding();
+    codingValue.setSystem("urn:oid:2.16.840.1.113883.6.238");
+    codingValue.setCode(code);
+    codingValue.setDisplay(display);
+    extension.setUrl(extUrl);
+    extension.setValue(codingValue);
+    return extension;
+  }
+
+  @Test
+  public void testGetParticipantXml() {
+    R4FhirData r4FhirData1 = new R4FhirData();
+    Bundle bundle = loadBundleFromFile(PATIENT_RES_FILENAME);
+    r4FhirData1 = createR4Resource(r4FhirData1, bundle);
+
+    Coding coding = new Coding();
+    coding.setCode("N");
+    coding.setSystem(CdaGeneratorConstants.FHIR_CONTACT_RELATIONSHIP_CODESYSTEM);
+
+    List<ContactComponent> contactComponents = r4FhirData1.getPatient().getContact();
+
+    String expectedXml =
+        """
+        <participant typeCode="IND">
+        <associatedEntity classCode="NOK">
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>
+        <addr use="HP">
+        <streetAddressLine>534 Erewhon St</streetAddressLine>
+        <city>PleasantVille</city>
+        <county>Rainbow</county>
+        <state>Vic</state>
+        <postalCode>3999</postalCode>
+        <country nullFlavor="NI"/>
+        </addr>
+        <telecom value="tel:(323)799-8327"/>
+        <associatedPerson>
+        <name>
+        <given>B�n�dicte</given>
+        <family>du March�</family>
+        </name>
+        </associatedPerson>
+        </associatedEntity>
+        </participant>
+        """;
+
+    String actualXml =
+        CdaHeaderGenerator.getParticipantXml(
+            contactComponents.get(0), coding, launchDetails, r4FhirData1.getOrganization());
+
+    assertThat(actualXml).isNotNull();
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetTranslatableCodeableConceptCoding() {
+    List<CodeableConcept> codeableConcepts = new ArrayList<>();
+
+    Coding coding = new Coding();
+    coding.setCode("N");
+    coding.setSystem(CdaGeneratorConstants.FHIR_CONTACT_RELATIONSHIP_CODESYSTEM);
+
+    codeableConcepts.add(new CodeableConcept().setCoding(Collections.singletonList(coding)));
+
+    Coding actual = CdaHeaderGenerator.getTranslatableCodeableConceptCoding(codeableConcepts);
+
+    assertThat(actual).isNotNull();
+  }
+
+  @Test
+  public void testGetTranslatableCoding() {
+
+    Coding coding = new Coding();
+    coding.setCode("N");
+    coding.setSystem(CdaGeneratorConstants.FHIR_CONTACT_RELATIONSHIP_CODESYSTEM);
+
+    Coding actual = CdaHeaderGenerator.getTranslatableCoding(Collections.singletonList(coding));
+
+    assertThat(actual).isNotNull();
+  }
+
+  @Test
+  public void testGetPractitionerXml() {
+
+    Practitioner practitioner =
+        (Practitioner) loadResourceDataFromFile(Practitioner.class, PRACTITIONER_FILENAME);
+
+    String expectedXml =
+        """
+        <id root="2.16.840.1.113883.4.6"/>\r
+        <addr use="HP">\r
+        <streetAddressLine>534 Erewhon St</streetAddressLine>\r
+        <city>PleasantVille</city>\r
+        <state>Vic</state>\r
+        <postalCode>3999</postalCode>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <telecom nullFlavor="NI"/>\r
+        <assignedPerson>\r
+        <name>\r
+        <given>Adam</given>\r
+        <family>Careful</family>\r
+        </name>\r
+        </assignedPerson>\r
+        """;
+    String actualXml = CdaFhirUtilities.getPractitionerXml(practitioner, null);
+
+    assertThat(actualXml).isNotNull();
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateLocationXml_withLocation() {
+    Location location = (Location) loadResourceDataFromFile(Location.class, LOCATION_FILENAME);
+    Organization organization =
+        (Organization) loadResourceDataFromFile(Organization.class, ORGANIZATION_FILENAME);
+
+    String expectedXml =
+        """
+        <id root="2.16.840.1.113883.1.1.1.1" extension="1"/>\r
+        <code nullFlavor="NI"/>\r
+        <location>\r
+        <name>South Wing, second floor</name>\r
+        <addr use="WP">\r
+        <streetAddressLine>Galapagosweg 91, Building A</streetAddressLine>\r
+        <city>Den Burg</city>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode>9105 PZ</postalCode>\r
+        <country>NLD</country>\r
+        </addr>\r
+        </location>""";
+
+    String actualXml = CdaHeaderGenerator.getLocationXml(location, organization, launchDetails);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateLocationXml_withOrganization() {
+    Organization organization =
+        (Organization) loadResourceDataFromFile(Organization.class, ORGANIZATION_FILENAME);
+
+    String expectedXml =
+        """
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>\r
+        <code nullFlavor="NI"/>\r
+        <location>\r
+        <name>Health Level Seven International</name>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        </location>""";
+
+    String actualXml = CdaHeaderGenerator.getLocationXml(null, organization, launchDetails);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateLocationXml_noLocationOrOrganization() {
+    String expectedXml =
+        """
+        <id root="2.16.840.1.113883.1.1.1.1" extension="Unknown"/>\r
+        <code nullFlavor="NI"/>\r
+        <location>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        </location>\r
+        """;
+
+    String actualXml = CdaHeaderGenerator.getLocationXml(null, null, launchDetails);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetAdditionalAuthorXml() {
+
+    String expectedXml =
+        """
+        <author>
+        <time value="20230503103307+0000"/><assignedAuthor>
+        <id root="b56b6d6d-7d6e-4ff4-9e5c-f8625c7babe9" extension="manfacture-1.0v"/>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        <telecom nullFlavor="NI"/>
+        <assignedAuthoringDevice>
+        <manufacturerModelName>manfacture</manufacturerModelName>
+        <softwareName>1.0v</softwareName>
+        </assignedAuthoringDevice>
+        </assignedAuthor>
+        </author>
+        """;
+
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForEffectiveTime(any(), any()))
+        .thenReturn("<time value=\"20230503103307+0000\"/>");
+    PowerMockito.when(CdaGeneratorUtils.getGuid())
+        .thenReturn("b56b6d6d-7d6e-4ff4-9e5c-f8625c7babe9");
+    String actualXml = CdaHeaderGenerator.getAdditionalAuthorXml("manfacture", "1.0v");
+
+    assertThat(actualXml).isNotNull();
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateAuthorXml_noPractitionerData() {
+    String expectedXml =
+        """
+        <author>\r
+        <time value="20230503103307+0000"/><assignedAuthor>\r
+        <id root="2.16.840.1.113883.4.6"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <telecom nullFlavor="NI"/>\r
+        <assignedPerson>\r
+        <name>\r
+        <given nullFlavor="NI"/>\r
+        <family nullFlavor="NI"/>\r
+        </name>\r
+        </assignedPerson>\r
+        </assignedAuthor>\r
+        </author>\r
+        """;
+
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForEffectiveTime(any(), any()))
+        .thenReturn("<time value=\"20230503103307+0000\"/>");
+
+    String actualXml = CdaHeaderGenerator.getAuthorXml(r4FhirData, null, null);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateAuthorXml_withPractitionerData() {
+    HashMap<V3ParticipationType, List<Practitioner>> practitionerMap = new HashMap<>();
+    R4FhirData r4FhirData = new R4FhirData();
+    Practitioner practitioner = new Practitioner();
+    List<Practitioner> practitionerList = new ArrayList<>();
+    practitionerList.add(practitioner);
+    practitionerMap.put(V3ParticipationType.PPRF, practitionerList);
+    Encounter encounter =
+        (Encounter)
+            loadResourceDataFromFile(
+                Encounter.class, "CdaTestData/Encounter/Encounter_withOneParticipant.json");
+
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForEffectiveTime(any(), any()))
+        .thenReturn("<time value=\"20230503103307+0000\"/>");
+
+    String expectedXml =
+        """
+        <author>\r
+        <time value="20200512134056+0000"/>\r
+        <assignedAuthor>\r
+        <id root="2.16.840.1.113883.4.6"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <telecom nullFlavor="NI"/>\r
+        <assignedPerson>\r
+        <name>\r
+        <given nullFlavor="NI"/>\r
+        <family nullFlavor="NI"/>\r
+        </name>\r
+        </assignedPerson>\r
+        </assignedAuthor>\r
+        </author>\r
+        """;
+
+    String actualXml = CdaHeaderGenerator.getAuthorXml(r4FhirData, encounter, practitionerMap);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetAuthorXmlWith_noEncounterData() {
+
+    HashMap<V3ParticipationType, List<Practitioner>> practMap =
+        new HashMap<V3ParticipationType, List<Practitioner>>();
+
+    Practitioner pr = new Practitioner();
+    List<Practitioner> practList = new ArrayList<Practitioner>();
+    practList.add(pr);
+    practMap.put(V3ParticipationType.ATND, practList);
+
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForEffectiveTime(any(), any()))
+        .thenReturn("<time value=\"20230503103307+0000\"/>");
+
+    String expectedXml =
+        """
+        <author>\r
+        <time value="20230503103307+0000"/><assignedAuthor>\r
+        <id root="2.16.840.1.113883.4.6"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <telecom nullFlavor="NI"/>\r
+        <assignedPerson>\r
+        <name>\r
+        <given nullFlavor="NI"/>\r
+        <family nullFlavor="NI"/>\r
+        </name>\r
+        </assignedPerson>\r
+        </assignedAuthor>\r
+        </author>\r
+        """;
+
+    String actualXml = CdaHeaderGenerator.getAuthorXml(r4FhirData, null, practMap);
+
+    assertThat(actualXml).isNotNull();
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetAuthorXmlWith_noEncounter() {
+
+    HashMap<V3ParticipationType, List<Practitioner>> practMap =
+        new HashMap<V3ParticipationType, List<Practitioner>>();
+    Practitioner pr = new Practitioner();
+    List<Practitioner> practList = new ArrayList<Practitioner>();
+    practList.add(pr);
+    practMap.put(V3ParticipationType.SPRF, practList);
+
+    String actual = CdaHeaderGenerator.getAuthorXml(r4FhirData, null, practMap);
+
+    assertThat(actual).isNotNull();
+  }
+
+  @Test
+  public void testGenerateOrganizationXml_withOrganizationData() {
+    Organization organization =
+        (Organization) loadResourceDataFromFile(Organization.class, ORGANIZATION_FILENAME);
+
+    String expectedXml =
+        """
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>\r
+        <name>Health Level Seven International</name>\r
+        <telecom nullFlavor="NI"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        """;
+
+    String actualXml =
+        CdaHeaderGenerator.getOrganizationXml(organization, launchDetails, false, false);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGenerateOrganizationXml_withNoOrganizationData() {
+    String expectedXml =
+        """
+        <id nullFlavor="NI"/>\r
+        <name>Unknown</name>\r
+        <telecom nullFlavor="NI"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>""";
+    String actualXml = CdaHeaderGenerator.getOrganizationXml(null, launchDetails, false, false);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetCustodianXml() {
+    R4FhirData r4FhirData1 = new R4FhirData();
+
+    Organization organization =
+        (Organization) loadResourceDataFromFile(Organization.class, ORGANIZATION_FILENAME);
+    r4FhirData1.setOrganization(organization);
+
+    String expectedXml =
+        """
+        <custodian>\r
+        <assignedCustodian>\r
+        <representedCustodianOrganization>\r
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>\r
+        <name>Health Level Seven International</name>\r
+        <telecom nullFlavor="NI"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        </representedCustodianOrganization>\r
+        </assignedCustodian>\r
+        </custodian>\r
+        """;
+    String actualXml = CdaHeaderGenerator.getCustodianXml(launchDetails, r4FhirData1);
+
+    assertThat(actualXml).isNotNull();
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetEncompassingEncounter() {
+    HashMap<V3ParticipationType, List<Practitioner>> practMap =
+        new HashMap<V3ParticipationType, List<Practitioner>>();
+    R4FhirData r4FhirData1 = new R4FhirData();
+    Practitioner pr = new Practitioner();
+    List<Practitioner> practList = new ArrayList<Practitioner>();
+    practList.add(pr);
+    practMap.put(V3ParticipationType.PPRF, practList);
+
+    Location location = (Location) loadResourceDataFromFile(Location.class, LOCATION_FILENAME);
+
+    Organization organization =
+        (Organization) loadResourceDataFromFile(Organization.class, ORGANIZATION_FILENAME);
+
+    Encounter encounter =
+        (Encounter)
+            loadResourceDataFromFile(
+                Encounter.class, "CdaTestData/Encounter/Encounter_withOneParticipant.json");
+
+    r4FhirData1.setOrganization(organization);
+    r4FhirData1.setLocation(location);
+
+    String expectedXml =
+        """
+        <componentOf>
+        <encompassingEncounter>
+        <id root="2.16.840.1.113883.1.1.1.1" extension="97953900"/>
+        <id root="2.16.840.1.113883.4.4" extension="98314717"/>
+        <code code="IMP" codeSystem="2.16.840.1.113883.5.4" codeSystemName="v3-ActCode" displayName="inpatient encounter"></code>
+        <effectiveTime>
+        <low value="20200512134056+0000"/>
+        <high value="20200512134057+0000"/>
+        </effectiveTime>
+        <responsibleParty>
+        <assignedEntity>
+        <id root="2.16.840.1.113883.4.6"/>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        <telecom nullFlavor="NI"/>
+        <assignedPerson>
+        <name>
+        <given nullFlavor="NI"/>
+        <family nullFlavor="NI"/>
+        </name>
+        </assignedPerson>
+        <representedOrganization>
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>
+        <name>Health Level Seven International</name>
+        <telecom nullFlavor="NI"/>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        </representedOrganization>
+        </assignedEntity>
+        </responsibleParty>
+        <location>
+        <healthCareFacility>
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>
+        <code nullFlavor="NI"/>
+        <location>
+        <name>Health Level Seven International</name>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        </location>
+        <serviceProviderOrganization>
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>
+        <name>Health Level Seven International</name>
+        <telecom nullFlavor="NI"/>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        </serviceProviderOrganization>
+        </healthCareFacility>
+        </location>
+        </encompassingEncounter>
+        </componentOf>
+        """;
+    String actualXml =
+        CdaHeaderGenerator.getEncompassingEncounter(
+            encounter, practMap, launchDetails, r4FhirData1);
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetEncompassingEncounter_withNoEncounterData() {
+    HashMap<V3ParticipationType, List<Practitioner>> practMap =
+        new HashMap<V3ParticipationType, List<Practitioner>>();
+    R4FhirData r4FhirData1 = new R4FhirData();
+    Practitioner pr = new Practitioner();
+    List<Practitioner> practList = new ArrayList<Practitioner>();
+    practList.add(pr);
+    practMap.put(V3ParticipationType.PPRF, practList);
+
+    Location location = (Location) loadResourceDataFromFile(Location.class, LOCATION_FILENAME);
+
+    Organization organization =
+        (Organization) loadResourceDataFromFile(Organization.class, ORGANIZATION_FILENAME);
+
+    r4FhirData1.setOrganization(organization);
+    r4FhirData1.setLocation(location);
+
+    String expectedXml =
+        """
+        <componentOf>
+        <encompassingEncounter>
+        <id root="b56b6d6d-7d6e-4ff4-9e5c-f8625c7babe9"/><code nullFlavor="NI"/>
+        <effectiveTime nullFlavor="NI"/>
+        <responsibleParty>
+        <assignedEntity>
+        <id root="2.16.840.1.113883.4.6"/>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        <telecom nullFlavor="NI"/>
+        <assignedPerson>
+        <name>
+        <given nullFlavor="NI"/>
+        <family nullFlavor="NI"/>
+        </name>
+        </assignedPerson>
+        <representedOrganization>
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>
+        <name>Health Level Seven International</name>
+        <telecom nullFlavor="NI"/>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        </representedOrganization>
+        </assignedEntity>
+        </responsibleParty>
+        <location>
+        <healthCareFacility>
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>
+        <code nullFlavor="NI"/>
+        <location>
+        <name>Health Level Seven International</name>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        </location>
+        <serviceProviderOrganization>
+        <id root="2.16.840.1.113883.1.1.1.1" extension="hl7"/>
+        <name>Health Level Seven International</name>
+        <telecom nullFlavor="NI"/>
+        <addr>
+        <streetAddressLine nullFlavor="NI"/>
+        <city nullFlavor="NI"/>
+        <state nullFlavor="NI"/>
+        <postalCode nullFlavor="NI"/>
+        <country nullFlavor="NI"/>
+        </addr>
+        </serviceProviderOrganization>
+        </healthCareFacility>
+        </location>
+        </encompassingEncounter>
+        </componentOf>
+        """;
+
+    PowerMockito.mockStatic(CdaGeneratorUtils.class, Mockito.CALLS_REAL_METHODS);
+    PowerMockito.when(CdaGeneratorUtils.getXmlForIIUsingGuid())
+        .thenReturn("<id root=\"b56b6d6d-7d6e-4ff4-9e5c-f8625c7babe9\"/>");
+
+    String actualXml =
+        CdaHeaderGenerator.getEncompassingEncounter(null, practMap, launchDetails, r4FhirData1);
+
+    assertEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetEncompassingEncounter_usesFilteredLocationWithValidAddress() {
+    HashMap<V3ParticipationType, List<Practitioner>> practMap =
+        new HashMap<V3ParticipationType, List<Practitioner>>();
+    Practitioner pr = new Practitioner();
+    List<Practitioner> practList = new ArrayList<Practitioner>();
+    practList.add(pr);
+    practMap.put(V3ParticipationType.PPRF, practList);
+
+    R4FhirData r4FhirData1 = new R4FhirData();
+
+    Organization organization =
+        (Organization) loadResourceDataFromFile(Organization.class, ORGANIZATION_FILENAME);
+    r4FhirData1.setOrganization(organization);
+
+    Location incompleteLocation =
+        (Location) loadResourceDataFromFile(Location.class, LOCATION_FILENAME);
+    r4FhirData1.setLocation(incompleteLocation);
+
+    Location validLocation = new Location();
+    validLocation.setId("valid-location");
+    validLocation.setName("Valid Full Address Location");
+    Address addr = new Address();
+    addr.addLine("100 Main St");
+    addr.setCity("Springfield");
+    addr.setState("IL");
+    addr.setPostalCode("62701");
+    validLocation.setAddress(addr);
+
+    r4FhirData1.setLocationList(Collections.singletonList(validLocation));
+
+    String actualXml =
+        CdaHeaderGenerator.getEncompassingEncounter(null, practMap, launchDetails, r4FhirData1);
+
+    assertThat(actualXml).contains("Valid Full Address Location");
+    assertThat(actualXml).contains("Springfield");
+    assertThat(actualXml).contains("IL");
+    assertThat(actualXml).doesNotContain("South Wing, second floor");
+  }
+
+  @Test
+  public void testGetSortedPractitionerList() {
+    R4FhirData r4FhirData1 = new R4FhirData();
+    Encounter encounter =
+        (Encounter)
+            loadResourceDataFromFile(
+                Encounter.class, "CdaTestData/Encounter/Encounter_withOneParticipant.json");
+    r4FhirData1.setEncounter(encounter);
+    Practitioner practitioner = new Practitioner();
+    practitioner.setId("11817978");
+    r4FhirData1.setPractitionersList(Collections.singletonList(practitioner));
+
+    HashMap<V3ParticipationType, List<Practitioner>> actual =
+        CdaHeaderGenerator.getSortedPractitionerList(r4FhirData1);
+
+    assertNotNull(actual);
+  }
+
+  @Test
+  public void testGetXmlForRelevantPractitioner() {
+    HashMap<V3ParticipationType, List<Practitioner>> practMap =
+        new HashMap<V3ParticipationType, List<Practitioner>>();
+    Practitioner pr = new Practitioner();
+    List<Practitioner> practList = new ArrayList<Practitioner>();
+    practList.add(pr);
+    practMap.put(V3ParticipationType.PPRF, practList);
+    Organization org = new Organization();
+
+    ContactPoint contactPoint = new ContactPoint();
+    contactPoint.setSystem(ContactPoint.ContactPointSystem.PHONE);
+    contactPoint.setValue("8166742878");
+
+    org.setTelecom(Collections.singletonList(contactPoint));
+    String result = CdaHeaderGenerator.getXmlForRelevantPractitioner(practMap, org);
+    assertNotNull(result);
+    assertTrue(result.length() > 0);
+
+    practMap.clear();
+
+    practMap.put(V3ParticipationType.ATND, practList);
+
+    String result1 = CdaHeaderGenerator.getXmlForRelevantPractitioner(practMap, org);
+    assertNotNull(result1);
+    assertTrue(result1.length() > 0);
+
+    practMap.clear();
+
+    practMap.put(V3ParticipationType.SPRF, practList);
+
+    String result2 = CdaHeaderGenerator.getXmlForRelevantPractitioner(practMap, org);
+    assertNotNull(result2);
+    assertTrue(result2.length() > 0);
+  }
+
+  @Test
+  public void testGetXmlForRelevantPractitioner_withNoPractitioner() {
+
+    String result1 = CdaHeaderGenerator.getXmlForRelevantPractitioner(null, null);
+    assertNotNull(result1);
+    assertTrue(result1.length() > 0);
+  }
+
+  @Test
+  public void testGetXmlForAllRelevantPractitioners() {
+    String result = CdaHeaderGenerator.getXmlForAllRelevantPractitioners(new HashMap<>(), null);
+    assertEquals("", result);
+
+    Practitioner practitioner1 = new Practitioner();
+    List<Practitioner> practitioners1 = new ArrayList<>();
+    practitioners1.add(practitioner1);
+    HashMap<V3ParticipationType, List<Practitioner>> input2 = new HashMap<>();
+    input2.put(V3ParticipationType.ATND, practitioners1);
+    result = CdaHeaderGenerator.getXmlForAllRelevantPractitioners(input2, null);
+    assertTrue(result.contains("<encounterParticipant typeCode=\"ATND\">"));
+    assertTrue(result.contains("<assignedEntity>"));
+    assertTrue(result.contains("</assignedEntity>"));
+    assertTrue(result.contains("</encounterParticipant>"));
+
+    Practitioner practitioner2 = new Practitioner();
+    Practitioner practitioner3 = new Practitioner();
+    List<Practitioner> practitioners2 = new ArrayList<>();
+    List<Practitioner> practitioners3 = new ArrayList<>();
+    practitioners2.add(practitioner2);
+    practitioners3.add(practitioner3);
+    HashMap<V3ParticipationType, List<Practitioner>> input3 = new HashMap<>();
+    input3.put(V3ParticipationType.CON, practitioners2);
+    input3.put(V3ParticipationType.REF, practitioners3);
+    result = CdaHeaderGenerator.getXmlForAllRelevantPractitioners(input3, null);
+    assertTrue(result.contains("<encounterParticipant typeCode=\"CON\">"));
+    assertTrue(result.contains("<encounterParticipant typeCode=\"REF\">"));
+    assertTrue(result.contains("<assignedEntity>"));
+    assertTrue(result.contains("</assignedEntity>"));
+    assertTrue(result.contains("</encounterParticipant>"));
+  }
+
+  @Test
+  public void testGetPatientDetails() {
+    R4FhirData r4FhirData1 = new R4FhirData();
+    Bundle bundle = loadBundleFromFile(PATIENT_RES_FILENAME);
+    r4FhirData1 = createR4Resource(r4FhirData1, bundle);
+
+    String expectedXml =
+        """
+        <recordTarget>\r
+        <patientRole>\r
+        <id root="2.16.840.1.113883.1.1.1.1" extension="123456"/>\r
+        <addr use="HP">\r
+        <streetAddressLine>2221 HOME STREET</streetAddressLine>\r
+        <city>SALT LAKE CITY</city>\r
+        <state>UT</state>\r
+        <postalCode>84101</postalCode>\r
+        <country>USA</country>\r
+        </addr>\r
+        <addr>\r
+        <streetAddressLine>2221 HOME STREET</streetAddressLine>\r
+        <city>SALT LAKE CITY</city>\r
+        <state>UT</state>\r
+        <postalCode>84101</postalCode>\r
+        <country>USA</country>\r
+        </addr>\r
+        <telecom value="tel:(555)555-5006" use="HP"/>\r
+        <telecom value="tel:(555)555-5006" use="MC"/>\r
+        <telecom value="mailto:jill@email.com"/>\r
+        <patient>\r
+        <name use="L">\r
+        <given>Jill</given>\r
+        <family>Test</family>\r
+        </name>\r
+        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1" codeSystemName="HL7AdministrativeGenderCode" displayName="female"/>\r
+        <birthTime value="20201027"/>\r
+        <sdtc:deceasedInd value="false"/>\r
+        <maritalStatusCode code="S" codeSystem="2.16.840.1.113883.5.2" codeSystemName="v3-MaritalStatus" displayName="Never Married"/>\r
+        <raceCode code="2028-9" codeSystem="2.16.840.1.113883.6.238" codeSystemName="Race &amp; Ethnicity - CDC" displayName="Asian"/>\r
+        <ethnicGroupCode code="2186-5" codeSystem="2.16.840.1.113883.6.238" codeSystemName="Race &amp; Ethnicity - CDC" displayName="Not Hispanic or Latino"/>\r
+        <guardian>\r
+        <code nullFlavor="OTH"><translation code="N" codeSystem="2.16.840.1.113883.18.58" codeSystemName="v2-0131"/>\r
+        </code>\r
+        <addr use="HP">\r
+        <streetAddressLine>534 Erewhon St</streetAddressLine>\r
+        <city>PleasantVille</city>\r
+        <county>Rainbow</county>\r
+        <state>Vic</state>\r
+        <postalCode>3999</postalCode>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <telecom value="tel:(323)799-8327"/>\r
+        <guardianPerson>\r
+        <name>\r
+        <given>B�n�dicte</given>\r
+        <family>du March�</family>\r
+        </name>\r
+        </guardianPerson>\r
+        </guardian>\r
+        <languageCommunication>\r
+        <languageCode code="en"/>\r
+        </languageCommunication>\r
+        </patient>\r
+        </patientRole>\r
+        </recordTarget>\r
+
+        """;
+
+    String actualXml =
+        CdaHeaderGenerator.getPatientDetails(r4FhirData1.getPatient(), launchDetails);
+
+    assertThat(actualXml).isNotNull();
+
+    assertXmlEquals(expectedXml, actualXml);
+  }
+
+  @Test
+  public void testGetDeceasedXml() {
+
+    Patient p = getPatientData();
+
+    String decXml = CdaHeaderGenerator.getDeceasedXml(p);
+
+    assertTrue(decXml.contains("false"));
+
+    BooleanType btf = new BooleanType(false);
+    p.setDeceased(btf);
+
+    decXml = CdaHeaderGenerator.getDeceasedXml(p);
+    assertTrue(decXml.contains("false"));
+
+    BooleanType btt = new BooleanType(true);
+    p.setDeceased(btt);
+    decXml = CdaHeaderGenerator.getDeceasedXml(p);
+    assertTrue(decXml.contains("true"));
+    assertTrue(decXml.contains("sdtc:deceasedInd value="));
+    assertTrue(decXml.contains("sdtc:deceasedTime nullFlavor="));
+    assertTrue(decXml.contains("NI"));
+
+    DateTimeType dtt = new DateTimeType();
+    dtt.setValue(Date.from(Instant.now()));
+    p.setDeceased(dtt);
+
+    decXml = CdaHeaderGenerator.getDeceasedXml(p);
+    assertTrue(decXml.contains("true"));
+    assertTrue(decXml.contains("sdtc:deceasedInd value="));
+    assertFalse(decXml.contains("sdtc:deceasedTime nullFlavor="));
+    assertTrue(decXml.contains("sdtc:deceasedTime value="));
+
+    BooleanType st = new BooleanType();
+    p.setDeceased(st);
+    decXml = CdaHeaderGenerator.getDeceasedXml(p);
+    assertTrue(decXml.contains("false"));
+
+    DateTimeType dtt1 = new DateTimeType();
+    p.setDeceased(dtt1);
+
+    decXml = CdaHeaderGenerator.getDeceasedXml(p);
+    assertTrue(decXml.contains("true"));
+    assertTrue(decXml.contains("sdtc:deceasedInd value="));
+    assertTrue(decXml.contains("sdtc:deceasedTime nullFlavor="));
+  }
+
+  @Override
+  public Patient getPatientData() {
+
+    Patient p = new Patient();
+
+    p.setId("5474974");
+
+    Extension ext1 = new Extension();
+    ext1.setUrl("http://hl7.org/fhir/us/core/StructureDefinition/us-core-race");
+
+    Extension subext1 = new Extension();
+    subext1.setUrl("ombCategory");
+
+    Coding st1 = new Coding();
+    st1.setSystem("http://hl7.org/fhir/v3/NullFlavor");
+    st1.setCode("UNK");
+    st1.setDisplay("Unknown");
+    Type tp1 = (Type) st1;
+    subext1.setValue(tp1);
+    ext1.addExtension(subext1);
+
+    Extension ext = new Extension();
+    ext.setUrl("http://hl7.org/fhir/us/core/StructureDefinition/us-core-ethnicity");
+    Extension subext = new Extension();
+    subext.setUrl("text");
+
+    StringType st = new StringType("Unavailable");
+    Type tp = (Type) st;
+    subext.setValue(tp);
+    ext.addExtension(subext);
+
+    p.addExtension(ext1);
+    p.addExtension(ext);
+
+    return p;
+  }
+
+  public String getCdaHeaderData() {
+    String cdaHeaderXml =
+        """
+        <?xml version="1.0"?>\r
+        <ClinicalDocument xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"\r
+         xmlns="urn:hl7-org:v3"\r
+         xmlns:cda="urn:hl7-org:v3"\r
+         xmlns:sdtc="urn:hl7-org:sdtc">\r
+        <realmCode code="US"/>\r
+        <typeId root="2.16.840.1.113883.1.3" extension="POCD_HD000040"/>\r
+        <templateId root="2.16.840.1.113883.10.20.22.1.1"/>\r
+        <templateId root="2.16.840.1.113883.10.20.22.1.1" extension="2015-08-01"/>\r
+        <templateId root="2.16.840.1.113883.10.20.15.2" extension="2016-12-01"/>\r
+        <id root="d5d04894-e345-4571-afc5-56db664e2678"/>\r
+        <code code="55751-2" codeSystem="2.16.840.1.113883.6.1" codeSystemName="LOINC" displayName="Initial Public Health Case Report"/>\r
+        <title>Initial Public Health Case Report</title>\r
+        <effectiveTime value="20230508134408+0530"/>\r
+        <confidentialityCode code="N" codeSystem="2.16.840.1.113883.5.25"/>\r
+        <languageCode code="en-US"/>\r
+        <setId root="2.16.840.1.113883.1.1.1.1" extension="1"/>\r
+        <versionNumber value="43"/>\r
+        <recordTarget>\r
+        <patientRole>\r
+        <id root="2.16.840.1.113883.1.1.1.1" extension="a-11287.E-4237"/>\r
+        <addr use="HP">\r
+        <streetAddressLine>2221 HOME STREET</streetAddressLine>\r
+        <city>SALT LAKE CITY</city>\r
+        <state>UT</state>\r
+        <postalCode>84101</postalCode>\r
+        <country>USA</country>\r
+        </addr>\r
+        <addr>\r
+        <streetAddressLine>2221 HOME STREET</streetAddressLine>\r
+        <city>SALT LAKE CITY</city>\r
+        <state>UT</state>\r
+        <postalCode>84101</postalCode>\r
+        <country>USA</country>\r
+        </addr>\r
+        <telecom value="tel:(555)555-5006" use="HP"/>\r
+        <telecom value="tel:(555)555-5006" use="MC"/>\r
+        <telecom value="mailto:jill@email.com"/>\r
+        <patient>\r
+        <name use="L">\r
+        <given qualifier="PR">Jill</given>\r
+        <family>Test</family>\r
+        </name>\r
+        <administrativeGenderCode code="F" codeSystem="2.16.840.1.113883.5.1"/>\r
+        <birthTime value="20201027"/>\r
+        <sdtc:deceasedInd value="false"/>\r
+        <maritalStatusCode code="S" codeSystem="2.16.840.1.113883.5.2" codeSystemName="v3-MaritalStatus" displayName="Never Married"/>\r
+        <raceCode code="2028-9" codeSystem="2.16.840.1.113883.6.238" codeSystemName="Race &amp; Ethnicity - CDC" displayName="Asian"/>\r
+        <ethnicGroupCode code="2186-5" codeSystem="2.16.840.1.113883.6.238" codeSystemName="Race &amp; Ethnicity - CDC" displayName="Not Hispanic or Latino"/>\r
+        <languageCommunication>\r
+        <languageCode code="en"/>\r
+        </languageCommunication>\r
+        </patient>\r
+        </patientRole>\r
+        </recordTarget>\r
+        <author>\r
+        <time value="20220920101200+0000"/>\r
+        <assignedAuthor>\r
+        <id root="2.16.840.1.113883.4.6"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <telecom nullFlavor="NI"/>\r
+        <assignedPerson>\r
+        <name>\r
+        <given nullFlavor="NI"/>\r
+        <family nullFlavor="NI"/>\r
+        </name>\r
+        </assignedPerson>\r
+        </assignedAuthor>\r
+        </author>\r
+        <author>\r
+        <time value="20230508134408+0530"/>\r
+        <assignedAuthor>\r
+        <id root="12219cbd-8006-43a1-b933-dfdcb989c0e4"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <assignedAuthoringDevice>\r
+        <manufacturerModelName displayName="ecrNowApp"/>\r
+        <softwareName displayName="Version 3.1.X"/>\r
+        </assignedAuthoringDevice>\r
+        </assignedAuthor>\r
+        </author>\r
+        <author>\r
+        <time value="20230508134408+0530"/>\r
+        <assignedAuthor>\r
+        <id root="99055c5f-819d-402d-b12e-db78ddf23080"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <assignedAuthoringDevice>\r
+        <manufacturerModelName displayName="Example-Ehr"/>\r
+        <softwareName displayName="1.0.0"/>\r
+        </assignedAuthoringDevice>\r
+        </assignedAuthor>\r
+        </author>\r
+        <author>\r
+        <time value="20230508134408+0530"/>\r
+        <assignedAuthor>\r
+        <id root="ba1de91b-a307-4e39-84fd-4009f15501a8"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <assignedAuthoringDevice>\r
+        <manufacturerModelName displayName="System-Integrator"/>\r
+        <softwareName displayName="1.0.0"/>\r
+        </assignedAuthoringDevice>\r
+        </assignedAuthor>\r
+        </author>\r
+        <custodian>\r
+        <assignedCustodian>\r
+        <representedCustodianOrganization>\r
+        <id nullFlavor="NI"/>\r
+        <name>Unknown</name>\r
+        <telecom nullFlavor="NI"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        </representedCustodianOrganization>\r
+        </assignedCustodian>\r
+        </custodian>\r
+        <componentOf>\r
+        <encompassingEncounter>\r
+        <id root="2.16.840.1.113883.1.1.1.1" extension="a-11287.stay-9787"/>\r
+        <id root="2.16.840.1.113883.1.1.1.1" extension="a-11287.stay-9787"/>\r
+        <code code="IMP" codeSystem="2.16.840.1.113883.5.4" codeSystemName="v3-ActCode" displayName="inpatient encounter"></code>\r
+        <effectiveTime>\r
+        <low value="20220920101200+0000"/>\r
+        <high nullFlavor="NI"/>\r
+        </effectiveTime>\r
+        <responsibleParty>\r
+        <assignedEntity>\r
+        <id root="2.16.840.1.113883.4.6"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        <telecom nullFlavor="NI"/>\r
+        <assignedPerson>\r
+        <name>\r
+        <given nullFlavor="NI"/>\r
+        <family nullFlavor="NI"/>\r
+        </name>\r
+        </assignedPerson>\r
+        <representedOrganization>\r
+        <id nullFlavor="NI"/>\r
+        <name>Unknown</name>\r
+        <telecom nullFlavor="NI"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        </representedOrganization>\r
+        </assignedEntity>\r
+        </responsibleParty>\r
+        <location>\r
+        <healthCareFacility>\r
+        <id root="2.16.840.1.113883.1.1.1.1" extension="Location/a-11287.Department-1"/>\r
+        <code code="CHR" codeSystem="2.16.840.1.113883.5.111" codeSystemName="v3-RoleCode" displayName="Chronic Care Facility"></code>\r
+        <location>\r
+        <addr>\r
+        <streetAddressLine>0987 Facility Drive</streetAddressLine>\r
+        <city>SALT LAKE CITY</city>\r
+        <state>UT</state>\r
+        <postalCode>84101-0001</postalCode>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        </location>\r
+        <serviceProviderOrganization>\r
+        <id nullFlavor="NI"/>\r
+        <name>Unknown</name>\r
+        <telecom nullFlavor="NI"/>\r
+        <addr>\r
+        <streetAddressLine nullFlavor="NI"/>\r
+        <city nullFlavor="NI"/>\r
+        <state nullFlavor="NI"/>\r
+        <postalCode nullFlavor="NI"/>\r
+        <country nullFlavor="NI"/>\r
+        </addr>\r
+        </serviceProviderOrganization>\r
+        </healthCareFacility>\r
+        </location>\r
+        </encompassingEncounter>
+        """;
+    return cdaHeaderXml;
+  }
+
+  @Test
+  public void testGetLocationXml_withAndWithoutLocationAndOrganization() {
+    Location loc = new Location();
+    loc.setId("loc-1");
+    loc.setName("Main Campus");
+    Address locAddr = new Address();
+    locAddr.addLine("1 Main St");
+    locAddr.setCity("Boston");
+    locAddr.setState("MA");
+    loc.setAddress(locAddr);
+
+    Organization org = new Organization();
+    org.setId("org-1");
+    org.setName("Example Hospital");
+
+    assertNotNull(CdaHeaderGenerator.getLocationXml(loc, org, launchDetails));
+
+    assertNotNull(CdaHeaderGenerator.getLocationXml(null, org, launchDetails));
+
+    assertNotNull(CdaHeaderGenerator.getLocationXml(loc, null, launchDetails));
+
+    assertNotNull(CdaHeaderGenerator.getLocationXml(null, null, launchDetails));
+  }
+
+  @Test
+  public void testGetDeceasedXml_allArms() {
+    Patient alive = new Patient();
+    alive.setId("p-alive");
+    assertNotNull(CdaHeaderGenerator.getDeceasedXml(alive));
+
+    Patient deceasedBoolean = new Patient();
+    deceasedBoolean.setId("p-dead-bool");
+    deceasedBoolean.setDeceased(new BooleanType(true));
+    assertNotNull(CdaHeaderGenerator.getDeceasedXml(deceasedBoolean));
+
+    Patient deceasedDate = new Patient();
+    deceasedDate.setId("p-dead-date");
+    deceasedDate.setDeceased(new DateTimeType(new Date()));
+    assertNotNull(CdaHeaderGenerator.getDeceasedXml(deceasedDate));
+
+    Patient notDeceased = new Patient();
+    notDeceased.setId("p-not-dead");
+    notDeceased.setDeceased(new BooleanType(false));
+    assertNotNull(CdaHeaderGenerator.getDeceasedXml(notDeceased));
+  }
+
+  @Test
+  public void testGetSortedPractitionerList_withNoEncounter() {
+    assertNotNull(CdaHeaderGenerator.getSortedPractitionerList(new R4FhirData()));
+  }
+
+  @Test
+  public void testGetPatientDetails_identifierArms() {
+    Patient withMr = new Patient();
+    withMr.setId("p-mr");
+    Identifier mr = new Identifier();
+    mr.setSystem("http://example.org/mrn");
+    mr.setValue("MRN-1");
+    mr.setType(
+        new CodeableConcept()
+            .addCoding(new Coding().setCode(CdaFhirEnumConstants.FHIR_ID_TYPE_MR)));
+    withMr.addIdentifier(mr);
+    assertNotNull(
+        "a patient with a usable MR identifier must produce recordTarget xml",
+        CdaHeaderGenerator.getPatientDetails(withMr, launchDetails));
+
+    Patient blankMr = new Patient();
+    blankMr.setId("p-blank-mr");
+    Identifier empty = new Identifier();
+    empty.setType(
+        new CodeableConcept()
+            .addCoding(new Coding().setCode(CdaFhirEnumConstants.FHIR_ID_TYPE_MR)));
+    blankMr.addIdentifier(empty);
+    blankMr.addIdentifier(empty.copy());
+    assertNotNull(
+        "identifiers with no system/value must fall back to the resource id, emitted once",
+        CdaHeaderGenerator.getPatientDetails(blankMr, launchDetails));
+
+    Patient none = new Patient();
+    none.setId("p-none");
+    assertNotNull(
+        "a patient with no identifiers must take the else arm",
+        CdaHeaderGenerator.getPatientDetails(none, launchDetails));
+  }
+
+  @Test
+  public void testGetPatientDetails_guardianAndLanguageArms() {
+    Patient withGuardian = new Patient();
+    withGuardian.setId("p-guardian");
+    Patient.ContactComponent contact = new Patient.ContactComponent();
+    contact.addRelationship(
+        new CodeableConcept()
+            .addCoding(
+                new Coding()
+                    .setSystem(CdaGeneratorConstants.FHIR_LOC_ROLE_CODE_TYPE_V3)
+                    .setCode("GUARD"))
+            .setText("guardian"));
+    contact.setName(new HumanName().setFamily("Doe").addGiven("John"));
+    contact.setAddress(new Address().addLine("1 Main St").setCity("Boston"));
+    withGuardian.addContact(contact);
+
+    withGuardian.addCommunication(
+        new Patient.PatientCommunicationComponent()
+            .setLanguage(
+                new CodeableConcept()
+                    .addCoding(
+                        new Coding()
+                            .setSystem(CdaGeneratorConstants.FHIR_LANGUAGE_CODESYSTEM_URL)
+                            .setCode("en")))
+            .setPreferred(true));
+
+    assertNotNull(
+        "a patient with a guardian and a preferred language must produce xml",
+        CdaHeaderGenerator.getPatientDetails(withGuardian, launchDetails));
+
+    Patient noGuardianNoLanguage = new Patient();
+    noGuardianNoLanguage.setId("p-plain");
+    assertNotNull(
+        "no contacts and no communication must take the nullFlavor language arm",
+        CdaHeaderGenerator.getPatientDetails(noGuardianNoLanguage, launchDetails));
+  }
+}
